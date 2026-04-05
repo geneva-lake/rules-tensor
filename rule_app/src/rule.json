@@ -1,0 +1,8 @@
+{
+    "if": {
+        "gte": {"value": 10}
+    },
+    "then": {
+        "multiply": {"value": 0.05}
+    }
+}

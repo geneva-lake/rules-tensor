@@ -1,0 +1,3 @@
+[workspace]
+members = ["rule_macros", "rule_app"]
+resolver = "2"
