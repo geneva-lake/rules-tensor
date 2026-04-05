@@ -5,15 +5,22 @@ use syn::{parse_macro_input, ItemFn, LitFloat, LitStr};
 #[derive(serde::Deserialize)]
 struct RuleConfig {
     #[serde(rename = "if")]
-    if_: CondConfig,
+    if_: RuleIf,
     then: ActConfig,
 }
 
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum CondConfig {
-    Gte { value: f32 },
-    Lte { value: f32 },
+struct RuleIf {
+    field: String,
+    #[serde(default)]
+    gte: Option<ValueConfig>,
+    #[serde(default)]
+    lte: Option<ValueConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct ValueConfig {
+    value: f32,
 }
 
 #[derive(serde::Deserialize)]
@@ -39,7 +46,7 @@ pub fn include_rule_kernel(attr: TokenStream, item: TokenStream) -> TokenStream 
             err
         )
     });
-    let cfg: RuleConfig = serde_json::from_str(&json).unwrap_or_else(|err| {
+    let cfg: Vec<RuleConfig> = serde_json::from_str(&json).unwrap_or_else(|err| {
         panic!(
             "include_rule_kernel: invalid JSON in {}: {}",
             full_path.display(),
@@ -47,20 +54,41 @@ pub fn include_rule_kernel(attr: TokenStream, item: TokenStream) -> TokenStream 
         )
     });
 
-    let (cond_op, cond_value) = match cfg.if_ {
-        CondConfig::Gte { value } => (quote!(>), value),
-        CondConfig::Lte { value } => (quote!(<), value),
-    };
+    let mut rule_blocks: Vec<proc_macro2::TokenStream> = Vec::new();
 
-    let (action_op, action_value) = match cfg.then {
-        ActConfig::Plus { value } => (quote!(+), value),
-        ActConfig::Multiply { value } => (quote!(*), value),
-    };
+    for rule in cfg {
+        let (cond_op, cond_value) = match (rule.if_.gte, rule.if_.lte) {
+            (Some(v), None) => (quote!(>), v.value),
+            (None, Some(v)) => (quote!(<), v.value),
+            _ => panic!("include_rule_kernel: condition must have exactly one of gte/lte"),
+        };
 
-    let cond_value_lit =
-        LitFloat::new(&format!("{cond_value}f32"), proc_macro2::Span::call_site());
-    let action_value_lit =
-        LitFloat::new(&format!("{action_value}f32"), proc_macro2::Span::call_site());
+        let field = rule.if_.field.to_lowercase();
+        let field_expr = match field.as_str() {
+            "price" => quote!(price),
+            "quantity" => quote!(quantity),
+            _ => panic!("include_rule_kernel: unsupported field {}", field),
+        };
+
+        let (action_op, action_value) = match rule.then {
+            ActConfig::Plus { value } => (quote!(+), value),
+            ActConfig::Multiply { value } => (quote!(*), value),
+        };
+
+        let cond_value_lit =
+            LitFloat::new(&format!("{cond_value}f32"), proc_macro2::Span::call_site());
+        let action_value_lit =
+            LitFloat::new(&format!("{action_value}f32"), proc_macro2::Span::call_site());
+
+        rule_blocks.push(quote! {
+            let cond_value = F::new(#cond_value_lit);
+            let action_value = F::new(#action_value_lit);
+            if #field_expr #cond_op cond_value {
+                value = value #action_op action_value;
+                bonus = value;
+            }
+        });
+    }
 
     let mut item_fn = parse_macro_input!(item as ItemFn);
 
@@ -68,11 +96,11 @@ pub fn include_rule_kernel(attr: TokenStream, item: TokenStream) -> TokenStream 
         const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #path_lit));
         if ABSOLUTE_POS < prices.len() {
             let price = prices[ABSOLUTE_POS];
-            let cond_value = F::new(#cond_value_lit);
-            let action_value = F::new(#action_value_lit);
-            let mask = if price #cond_op cond_value { F::new(1.0f32) } else { F::new(0.0f32) };
-            let result = price #action_op action_value;
-            output[ABSOLUTE_POS] = result * mask;
+            let quantity = quantities[ABSOLUTE_POS];
+            let mut value = price;
+            let mut bonus = F::new(0.0f32);
+            #(#rule_blocks)*
+            output[ABSOLUTE_POS] = bonus;
         }
     }));
 

@@ -9,3 +9,5 @@ cubecl-wgpu = "0.9"
 rule_macros = { path = "../rule_macros" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tenrso-core = "0.1.0-rc.1"
+tenrso-decomp = "0.1.0-rc.1"
