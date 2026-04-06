@@ -1,28 +1,8 @@
-[{
+{
     "if": {
-        "field": "price",
         "gte": {"value": 10}
     },
     "then": {
         "multiply": {"value": 0.05}
     }
-},
-{
-    "if": {
-        "field": "quantity",
-        "lte": {"value": 2}
-    },
-    "then": {
-        "multiply": {"value": 0.1}
-    }
-},
-{
-    "if": {
-        "field": "quantity",
-        "gte": {"value": 3}
-    },
-    "then": {
-        "multiply": {"value": 0.15}
-    }
 }
-]
